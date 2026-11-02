@@ -1,39 +1,34 @@
 <script>
-  import { relayInit } from 'nostr-tools'
-  import { WebSocket } from 'websocket-polyfill'
-  if (!globalThis.WebSocket) {
-    globalThis.WebSocket = WebSocket
-  }
+  import { SimplePool } from 'nostr-tools'
   // Prepare buffer and array to hold events
   let arr = []
-  // Get events from a Nostr relay
-  let damus = relayInit('wss://relay.damus.io')
-  let bitSo = relayInit('wss://nostr.bitcoiner.social')
 
-  let startDate = Math.max(Math.floor(Date.now()/1000)-604800, 1671773800)
+  let startDate = Math.max(Math.floor(Date.now() / 1000) - 604800, 1671773800)
+
+  const pool = new SimplePool()
+  const relays = ['wss://relay.damus.io', 'wss://nostr.bitcoiner.social']
 
   function getRelay() {
-    return new Promise(async (resolve, reject) => {
+    return new Promise((resolve, reject) => {
       try {
-        await damus.connect()
-        damus.on('connect', () => {
-          console.log(`Connected to ${damus.url}`)
-          subToRelay(damus)
-          return resolve(1)
-        })
-        damus.on('error', async () => {
-          try {
-            await bitSo.connect()
-            bitSo.on('connect', () => {
-              console.log(`Connected to ${bitSo.url}`)
-              subToRelay(bitSo)
-              return resolve(1)
-            })
-          } catch (err) {
-            console.error('getRelay threw an error trying to connect to bitSo')
-            return reject(err)
+      const sub = pool.subscribe(relays,
+        {
+          kinds: [1],
+          authors: ['2e3e962542609b370e0441f3a45c139c7e548287d63672dd6cc0717d825703f3'],
+          since: startDate
+        },
+        {
+          onevent: event => {
+            let parsed = JSON.parse(event.content)
+            arr = [...arr, parsed].sort((a, b) => parseInt(b.name) - parseInt(a.name))
+          },
+          oneose: () => {
+            console.log('Got EOSE from relays')
+            pool.close(relays)
+            resolve(1)
           }
-        })
+        }
+      )
       } catch (err) {
         console.error('getRelay threw an error')
         return reject(err)
@@ -41,39 +36,9 @@
     })
   }
 
-  function subToRelay(relay) {
-    let sub = relay.sub([
-      {
-        kinds: [1],
-        authors: ['2e3e962542609b370e0441f3a45c139c7e548287d63672dd6cc0717d825703f3'],
-        since: startDate
-      }
-    ])
-    // Insert received events into array and sort them
-    sub.on('event', event => {
-      let parsed = JSON.parse(event.content)
-      console.log(event)
-      if (arr.length === 0) {
-        arr.push(parsed)
-        arr = arr
-      } else {
-        arr.push(parsed)
-        arr.sort((a, b) => parseInt(b.name) - parseInt(a.name))
-        arr = arr
-      }
-    })
-    // Disconnect; no need for realtime updates
-    sub.on('eose', () => {
-      console.log(`Unsubscribing from ${relay.url}`)
-      sub.unsub()
-      relay.close()
-    })
-  }
-  
-  getRelay()
-    .catch(err => {
-      console.error(err)
-    })
+  getRelay().catch(err => {
+    console.error(err)
+  })
 
   export function getTime(name) {
     return name.substring(0,4) + '/' + name.substring(4,6) + '/' + name.substring(6,8) + ' '
@@ -98,7 +63,7 @@
           <td class="timeBox">{ getTime(parsed.name) }</td>
           <td class="contentBox">
             {#if (parsed.text === '')}
-            <img src="{parsed.url}" class="satImage">
+            <img src="{parsed.url}" alt="satellite transmission" class="satImage">
             {/if}
             {#if (parsed.url === '')}
             <p class="contentText" >{parsed.text}</p>
